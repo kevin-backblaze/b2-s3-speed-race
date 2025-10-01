@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Backblaze B2 vs AWS S3 — Speed Race</title>
+  <style>
+    :root{
+      --bb-red:#E21E2B; --aws-orange:#FF9900;
+      --ink:#0B0D11; --muted:#6b7280; --card:#ffffff; --line:#e5e7eb; --bg:#f7f7f8;
+    }
+    *{box-sizing:border-box}
+    body{ margin:0; background:var(--bg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color:var(--ink); }
+    header{ background: linear-gradient(135deg, var(--bb-red) 0%, #ff5a36 100%); color:white; box-shadow: 0 6px 24px rgba(0,0,0,.12); }
+    .header-bar{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; gap:14px; }
+    .brand-left{ display:flex; align-items:center; gap:12px; min-width:0; }
+    .logo{ width:34px; height:34px; display:block; border-radius:8px; background:#fff2f2; object-fit:contain; }
+    .title{ font-weight:800; letter-spacing:.3px; font-size:20px; line-height:1.1 }
+    .subtitle{ opacity:.9; font-size:13px; margin-top:2px; line-height:1.2 }
+    .header-actions{ display:flex; gap:10px; align-items:center; }
+    .btn-ghost{
+      background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.25);
+      padding:8px 12px; border-radius:10px; font-weight:700; cursor:pointer; backdrop-filter: blur(2px);
+    }
+    main{ padding:24px; max-width:1100px; margin:0 auto; }
+
+    .row { display:flex; gap:16px; flex-wrap:wrap; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.04); }
+    .stack { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px; }
+    label { display:block; font-weight:600; margin-bottom:6px; }
+    input[type="number"] { padding:10px 12px; width:100%; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .btns{ display:flex; gap:12px; flex-wrap:wrap; margin:16px 0; }
+    button{
+      padding:11px 16px; border-radius:12px; border:0; cursor:pointer; font-weight:700;
+      box-shadow:0 6px 16px rgba(0,0,0,.08); transform: translateY(0); transition: transform .08s ease, box-shadow .2s ease, opacity .2s ease;
+    }
+    .btn-primary{ background:var(--bb-red); color:white; }
+    button:active{ transform: translateY(1px); box-shadow:0 3px 10px rgba(0,0,0,.12); }
+    button:disabled{ opacity:.7; cursor:not-allowed; }
+
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; align-items:start; }
+    pre { background:#0b1020; color:#e5e7eb; padding:12px; border-radius:10px; overflow:auto; border:1px solid #0f1730; }
+
+    /* Simple progress bars */
+    .pb { height:16px; background:var(--line); border-radius:999px; overflow:hidden; }
+    .pb > div { height:100%; width:0%; background:#111827; transition: width .2s ease; border-radius:999px; }
+
+    .race { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    .muted { color:var(--muted); font-size:12px; }
+    .winner-badge{ display:inline-block; padding:6px 10px; border-radius:999px; background:#fff; border:1px solid var(--line); margin-top:6px; font-weight:700; }
+
+    footer{ text-align:center; color:var(--muted); font-size:12px; padding:20px 0 10px; }
+
+    /* Modal */
+    .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(11,13,17,.55); z-index:1000; }
+    .modal.show{ display:flex; }
+    .dialog{ width:min(720px, 92vw); background:#fff; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,.25); border:1px solid var(--line); }
+    .dialog header{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--line); }
+    .dialog h3{ margin:0; font-size:18px; }
+    .dialog .body{ padding:12px 16px 16px; color:#1f2937; }
+    .dialog .actions{ padding:12px 16px 16px; display:flex; justify-content:flex-end; gap:10px; }
+    .close-x{ background:transparent; border:0; font-size:22px; line-height:1; cursor:pointer; color:#374151; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="header-bar">
+      <div class="brand-left">
+        <img src="public/backblaze.png" alt="Backblaze" class="logo"/>
+        <div>
+          <div class="title">Backblaze B2 vs AWS S3 — Speed Race</div>
+          <div class="subtitle">Live uploads & downloads, side-by-side. Configure size, count, and concurrency.</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="aboutBtn" class="btn-ghost">About this test</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="row stack">
+      <div class="card">
+        <label>Object size (MB)</label>
+        <input id="sizeMB" type="number" min="1" max="100" value="1"
+          oninput="this.value=Math.min(Math.max(parseInt(this.value||1),1),100)"
+          onblur="this.value=Math.min(Math.max(parseInt(this.value||1),1),100)" />
+      </div>
+      <div class="card">
+        <label>Objects (count)</label>
+        <input id="count" type="number" min="1" max="100" value="20"
+          oninput="this.value=Math.min(Math.max(parseInt(this.value||1),1),100)"
+          onblur="this.value=Math.min(Math.max(parseInt(this.value||1),1),100)" />
+      </div>
+      <div class="card"><label>Concurrency</label><input id="conc" type="number" min="1" value="8" /></div>
+      <div class="card"><label>Multipart size (MB)</label><input id="partMB" type="number" min="5" placeholder="auto" /></div>
+    </div>
+
+    <div class="btns">
+      <button id="raceBtn" class="btn-primary">Race!</button>
+    </div>
+
+    <div class="card" id="raceCard" style="display:none;">
+      <h3 style="margin-top:0;">Live Race</h3>
+      <div class="race">
+        <div>
+          <strong>AWS Upload</strong>
+          <div class="pb"><div id="awsUp"></div></div>
+          <div class="muted" id="awsUpTxt">0 / 0</div>
+
+          <strong style="margin-top:10px; display:block;">AWS Download</strong>
+          <div class="pb"><div id="awsDown"></div></div>
+          <div class="muted" id="awsDownTxt">0 / 0</div>
+        </div>
+
+        <div>
+          <strong>B2 Upload</strong>
+          <div class="pb"><div id="b2Up"></div></div>
+          <div class="muted" id="b2UpTxt">0 / 0</div>
+
+          <strong style="margin-top:10px; display:block;">B2 Download</strong>
+          <div class="pb"><div id="b2Down"></div></div>
+          <div class="muted" id="b2DownTxt">0 / 0</div>
+        </div>
+      </div>
+      <div class="muted" id="phaseTxt" style="margin-top:10px;">Waiting…</div>
+      <div id="winnerTxt" class="winner-badge">Winner: —</div>
+    </div>
+
+    <div class="grid" style="margin-top:16px;">
+      <div class="card">
+        <h3 style="margin-top:0;">Throughput (MB/s)</h3>
+        <canvas id="tpChart" style="max-height:420px;"></canvas>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Latency (ms): p50 / p95 / p99</h3>
+        <canvas id="latChart" style="max-height:420px;"></canvas>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card">
+        <h3 style="margin-top:0;">Raw JSON</h3>
+        <pre id="json"></pre>
+      </div>
+    </div>
+
+    <footer>© Backblaze demo • S3-compatible tests for B2 vs AWS S3</footer>
+  </main>
+
+  <div id="aboutModal" class="modal" aria-hidden="true">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+      <header>
+        <h3 id="aboutTitle">About this test</h3>
+        <button id="aboutClose" class="close-x" aria-label="Close">×</button>
+      </header>
+      <div class="body">
+        <p><strong>What it does.</strong> This demo compares <em>Backblaze B2 (S3-compatible)</em> with <em>AWS S3</em> by uploading and then downloading a set of objects with configurable <em>size</em>, <em>count</em>, and <em>concurrency</em>.</p>
+        <ul>
+          <li>Reports <strong>throughput</strong> (MB/s) and <strong>latency percentiles</strong> (p50/p95/p99) per provider/op.</li>
+          <li>Uses AWS SDK v3; B2 via the S3-compatible endpoint you configure.</li>
+        </ul>
+        <p><strong>Not a formal benchmark.</strong> Results vary by instance size, region, network path, object size, and concurrency. For fair comparisons, run multiple rounds and keep provider regions/topology comparable.</p>
+        <p><strong>Housekeeping.</strong> Test objects are written under a default prefix (e.g. <code>perf-ui/</code>).</p>
+      </div>
+      <div class="actions">
+        <button id="aboutOk" class="btn-primary">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/public/app.js"></script>
+</body>
+</html>
