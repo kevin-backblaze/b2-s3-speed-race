@@ -168,3 +168,44 @@ proxy_read_timeout 3600s;
 
 ## License
 MIT
+
+---
+
+## Tuning & Concurrency Model
+
+**Two levels of parallelism:**
+
+- **Object-level (`concurrency`)** – how many **objects** are uploaded/downloaded at the same time.  
+  Controlled by the `concurrency` query param → used by `pLimit(concurrency)`.
+
+- **Part-level (`queueSize`)** – how many **multipart parts of a single object** are uploaded in parallel.  
+  Controlled in code by `new Upload({ queueSize: 8, ... })`. (Currently fixed at 8; you can expose a `partQueue` query param to make this tunable.)
+
+**Multipart size (`partMB`)**
+
+- Front end’s *Multipart size (MB)* is sent as `partMB` to the server.  
+  - If numeric (e.g., `partMB=16`) → forces **16 MB part size**.  
+  - If omitted or non-numeric (e.g., `partMB=auto`) → server uses **auto**: ~10% of object size, **clamped to 8–64 MB**.
+- **Backblaze B2 minimum part size is 5 MB** (except the last). Our defaults already use **≥ 8 MB**, so we’re compliant.
+
+**How they multiply**
+
+- For multipart uploads, the upper bound of simultaneous transfers per provider is roughly:  
+  **`concurrency × queueSize`**.  
+  Example: `concurrency=4`, `queueSize=8` → up to **32** part uploads in flight (4 objects × 8 parts each).
+
+**When multipart triggers**
+
+- Files **≥ ~8 MB** (default) use multipart; smaller files use single PUT (so `queueSize` doesn’t apply).
+
+**Suggested starting points**
+
+- `concurrency`: number of CPU cores to `2× cores`
+- `queueSize`: 4–8 on modest hosts; 8–16 on faster networks/instances
+- If you see 429/503 throttling or rising latency, reduce one (or both).
+
+**Optional: make `queueSize` tunable**
+
+- Add a `partQueue` query param and pass it to `Upload({ queueSize: partQueue })`, e.g.:  
+  `/api/race/stream?count=8&concurrency=8&partMB=16&partQueue=16`
+
